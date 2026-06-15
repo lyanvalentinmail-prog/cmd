@@ -1,0 +1,175 @@
+--=====================================================
+-- CMD UILIBRARY V4 (IMPROVED)
+--=====================================================
+
+local CMD = {}
+
+CMD.Prefix = ";"
+CMD.Commands = {}
+CMD.Aliases = {}
+CMD.Logs = {}
+CMD.History = {}
+CMD.HistoryIndex = 0
+
+--=====================================================
+-- UTILS
+--=====================================================
+local function split(str)
+    local t = {}
+    for s in str:gmatch("%S+") do
+        table.insert(t, s)
+    end
+    return t
+end
+
+local function log(text, kind)
+    kind = kind or "info"
+    table.insert(CMD.Logs, {
+        Text = text,
+        Type = kind,
+        Time = os.clock()
+    })
+    print("[CMD][" .. kind .. "] " .. text)
+end
+
+--=====================================================
+-- COMMAND REGISTRATION
+--=====================================================
+function CMD:AddCommand(data)
+    assert(data.Name, "Command needs Name")
+
+    local name = string.lower(data.Name)
+
+    CMD.Commands[name] = {
+        Name = name,
+        HasArgs = data.HasArgs or false,
+        ArgName = data.ArgName or "",
+        Desc = data.Desc or "No description",
+        Run = data.Run
+    }
+
+    if data.Aliases then
+        for _,a in ipairs(data.Aliases) do
+            CMD.Aliases[string.lower(a)] = name
+        end
+    end
+end
+
+--=====================================================
+-- EXECUTION
+--=====================================================
+function CMD:Execute(text)
+    if text == "" then return end
+    if text:sub(1,1) ~= CMD.Prefix then return end
+
+    table.insert(CMD.History, text)
+    CMD.HistoryIndex = #CMD.History + 1
+
+    local args = split(text)
+    local cmdName = string.lower(args[1]:sub(2))
+    table.remove(args, 1)
+
+    if CMD.Aliases[cmdName] then
+        cmdName = CMD.Aliases[cmdName]
+    end
+
+    local cmd = CMD.Commands[cmdName]
+    if not cmd then
+        log("Unknown command: "..cmdName, "error")
+        return
+    end
+
+    if cmd.HasArgs and #args == 0 then
+        log("Missing argument: "..cmd.ArgName, "error")
+        return
+    end
+
+    local ok,err = pcall(function()
+        cmd.Run(unpack(args))
+    end)
+
+    if not ok then
+        log(err, "error")
+    else
+        log("Executed "..cmdName, "success")
+    end
+end
+
+--=====================================================
+-- DEFAULT COMMAND: CMDS
+--=====================================================
+CMD:AddCommand({
+    Name = "cmds",
+    Desc = "List all commands",
+    Run = function()
+        log("===== COMMAND LIST =====","info")
+        for _,cmd in pairs(CMD.Commands) do
+            if cmd.HasArgs then
+                log(";"..cmd.Name.." ["..cmd.ArgName.."] - "..cmd.Desc,"info")
+            else
+                log(";"..cmd.Name.." - "..cmd.Desc,"info")
+            end
+        end
+    end
+})
+
+--=====================================================
+-- UI
+--=====================================================
+function CMD:CreateUI()
+    local Players = game:GetService("Players")
+    local LP = Players.LocalPlayer
+
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "CMD_UI"
+    gui.Parent = LP:WaitForChild("PlayerGui")
+
+    local frame = Instance.new("Frame", gui)
+    frame.Size = UDim2.fromScale(0.45,0.35)
+    frame.Position = UDim2.fromScale(0.275,0.32)
+    frame.BackgroundColor3 = Color3.fromRGB(15,15,15)
+    frame.BorderColor3 = Color3.fromRGB(70,70,70)
+    frame.BorderSizePixel = 1
+
+    local output = Instance.new("TextLabel", frame)
+    output.Size = UDim2.fromScale(1,0.85)
+    output.BackgroundTransparency = 1
+    output.TextXAlignment = Left
+    output.TextYAlignment = Top
+    output.TextWrapped = true
+    output.TextColor3 = Color3.new(1,1,1)
+    output.Text = ""
+    output.Font = Enum.Font.Code
+    output.TextSize = 14
+
+    local input = Instance.new("TextBox", frame)
+    input.Size = UDim2.fromScale(1,0.15)
+    input.Position = UDim2.fromScale(0,0.85)
+    input.BackgroundColor3 = Color3.fromRGB(20,20,20)
+    input.TextColor3 = Color3.new(1,1,1)
+    input.PlaceholderText = ";help"
+    input.ClearTextOnFocus = false
+    input.Font = Enum.Font.Code
+    input.TextSize = 16
+
+    local function refresh()
+        local txt = ""
+        for _,l in ipairs(CMD.Logs) do
+            txt ..="["..l.Type.."] "..l.Text.."\n"
+        end
+        output.Text = txt
+    end
+
+    input.FocusLost:Connect(function(enter)
+        if enter then
+            CMD:Execute(input.Text)
+            input.Text = ""
+            refresh()
+        end
+    end)
+end
+
+CMD:CreateUI()
+log("CMD Loaded","success")
+
+return CMD
