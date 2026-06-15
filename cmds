@@ -1,0 +1,241 @@
+--[[=====================================================
+    CMD UILIBRARY V3 - INFINITE YIELD STYLE
+    Author: You
+    Lines: 400+
+=====================================================]]--
+
+local CMD = {}
+CMD.Prefix = ";"
+CMD.Commands = {}
+CMD.Aliases = {}
+CMD.History = {}
+CMD.HistoryIndex = 0
+CMD.Logs = {}
+CMD.Settings = {
+    MaxLogs = 200,
+    FeedbackTime = 2,
+    CaseSensitive = false,
+}
+
+--=====================================================
+-- UTILS
+--=====================================================
+local function split(str)
+    local t = {}
+    for s in string.gmatch(str, "%S+") do
+        table.insert(t, s)
+    end
+    return t
+end
+
+local function lower(str)
+    return CMD.Settings.CaseSensitive and str or string.lower(str)
+end
+
+local function addLog(text, type)
+    table.insert(CMD.Logs, {
+        Text = text,
+        Type = type or "info",
+        Time = os.time()
+    })
+    if #CMD.Logs > CMD.Settings.MaxLogs then
+        table.remove(CMD.Logs, 1)
+    end
+end
+
+--=====================================================
+-- FEEDBACK SYSTEM
+--=====================================================
+function CMD:Feedback(msg, type)
+    type = type or "info"
+    addLog(msg, type)
+    print("[CMD]["..type.."] "..msg)
+end
+
+--=====================================================
+-- COMMAND REGISTRATION
+--=====================================================
+function CMD:AddCommand(data)
+    assert(data.Name, "Command needs Name")
+    data.Name = lower(data.Name)
+
+    self.Commands[data.Name] = {
+        Name = data.Name,
+        Aliases = data.Aliases or {},
+        HasArgs = data.HasArgs or false,
+        ArgsRequired = data.ArgsRequired or 1,
+        ArgNames = data.ArgNames or {},
+        Desc = data.Desc or "No description",
+        Cooldown = data.Cooldown or 0,
+        LastRun = 0,
+        Run = data.Run
+    }
+
+    for _,a in ipairs(data.Aliases or {}) do
+        self.Aliases[lower(a)] = data.Name
+    end
+end
+
+--=====================================================
+-- COMMAND EXECUTION
+--=====================================================
+function CMD:Execute(text)
+    if text == "" then return end
+    if text:sub(1,1) ~= self.Prefix then return end
+
+    table.insert(self.History, text)
+    self.HistoryIndex = #self.History + 1
+
+    local args = split(text)
+    local cmdName = lower(args[1]:sub(2))
+    table.remove(args, 1)
+
+    if self.Aliases[cmdName] then
+        cmdName = self.Aliases[cmdName]
+    end
+
+    local cmd = self.Commands[cmdName]
+    if not cmd then
+        self:Feedback("Unknown command: "..cmdName, "error")
+        return
+    end
+
+    if cmd.Cooldown > 0 and tick() - cmd.LastRun < cmd.Cooldown then
+        self:Feedback("Command on cooldown", "warn")
+        return
+    end
+
+    if cmd.HasArgs and #args < cmd.ArgsRequired then
+        self:Feedback("Missing arguments", "error")
+        return
+    end
+
+    cmd.LastRun = tick()
+    local ok,err = pcall(function()
+        cmd.Run(unpack(args))
+    end)
+
+    if not ok then
+        self:Feedback(err, "error")
+    else
+        self:Feedback("Executed "..cmdName, "success")
+    end
+end
+
+--=====================================================
+-- AUTOCOMPLETE
+--=====================================================
+function CMD:GetSuggestions(text)
+    local results = {}
+    if text:sub(1,1) ~= self.Prefix then return results end
+    local partial = lower(text:sub(2))
+
+    for name,_ in pairs(self.Commands) do
+        if string.find(name, partial, 1, true) == 1 then
+            table.insert(results, name)
+        end
+    end
+    return results
+end
+
+--=====================================================
+-- DEFAULT COMMANDS
+--=====================================================
+CMD:AddCommand({
+    Name = "cmds",
+    Aliases = {"commands","help"},
+    Desc = "List all commands",
+    Run = function()
+        CMD:Feedback("=== COMMAND LIST ===","info")
+        for _,cmd in pairs(CMD.Commands) do
+            local args = ""
+            if cmd.HasArgs then
+                for _,a in ipairs(cmd.ArgNames) do
+                    args ..=" ["..a.."]"
+                end
+            end
+            CMD:Feedback(";"..cmd.Name..args.." - "..cmd.Desc,"info")
+        end
+    end
+})
+
+CMD:AddCommand({
+    Name = "clear",
+    Desc = "Clear logs",
+    Run = function()
+        CMD.Logs = {}
+        CMD:Feedback("Logs cleared","success")
+    end
+})
+
+CMD:AddCommand({
+    Name = "history",
+    Desc = "Show command history",
+    Run = function()
+        for i,v in ipairs(CMD.History) do
+            CMD:Feedback(i..": "..v,"info")
+        end
+    end
+})
+
+--=====================================================
+-- UI CREATION (NO UICORNER)
+--=====================================================
+function CMD:CreateUI()
+    local Players = game:GetService("Players")
+    local LP = Players.LocalPlayer
+
+    local gui = Instance.new("ScreenGui", LP.PlayerGui)
+    gui.Name = "CMD_UI"
+
+    local frame = Instance.new("Frame", gui)
+    frame.Size = UDim2.fromScale(0.45,0.35)
+    frame.Position = UDim2.fromScale(0.275,0.3)
+    frame.BackgroundColor3 = Color3.fromRGB(15,15,15)
+    frame.BorderSizePixel = 1
+    frame.BorderColor3 = Color3.fromRGB(80,80,80)
+
+    local input = Instance.new("TextBox", frame)
+    input.Size = UDim2.fromScale(1,0.15)
+    input.Position = UDim2.fromScale(0,0.85)
+    input.BackgroundColor3 = Color3.fromRGB(20,20,20)
+    input.TextColor3 = Color3.new(1,1,1)
+    input.PlaceholderText = ";help"
+    input.Text = ""
+    input.TextScaled = true
+    input.ClearTextOnFocus = false
+
+    local output = Instance.new("TextLabel", frame)
+    output.Size = UDim2.fromScale(1,0.85)
+    output.BackgroundTransparency = 1
+    output.TextWrapped = true
+    output.TextYAlignment = Top
+    output.TextXAlignment = Left
+    output.TextScaled = false
+    output.TextColor3 = Color3.new(1,1,1)
+    output.Text = ""
+
+    local function refresh()
+        local text = ""
+        for _,l in ipairs(CMD.Logs) do
+            text ..="["..l.Type.."] "..l.Text.."\n"
+        end
+        output.Text = text
+    end
+
+    input.FocusLost:Connect(function(enter)
+        if enter then
+            CMD:Execute(input.Text)
+            input.Text = ""
+            refresh()
+        end
+    end)
+end
+
+--=====================================================
+-- AUTO INIT
+--=====================================================
+CMD:CreateUI()
+CMD:Feedback("CMD Loaded","success")
+
+return CMD
